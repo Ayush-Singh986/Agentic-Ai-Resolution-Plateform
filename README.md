@@ -494,11 +494,3 @@ Create a new ECS task-definition revision using the new image tag, then update t
 * Multi-Modal Incident Analysis
 
 ---
-
-# 👨‍💻 Author
-
-Sanket Kulkarni
-
-AI Engineer | Generative AI | Agentic AI | LLMOps | RAG | MLOps
-
----
