@@ -1,0 +1,17 @@
+[
+  {
+    "question":
+      "Payment API timeout",
+
+    "expected":
+      "Database connection pool exhaustion"
+  },
+
+  {
+    "question":
+      "Authentication failures",
+
+    "expected":
+      "Redis cache cluster unavailable"
+  }
+]

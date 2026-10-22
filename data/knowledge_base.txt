@@ -1,0 +1,45 @@
+Incident: Payment API latency spike
+
+Root Cause:
+Database connection pool exhaustion after production deployment.
+
+Resolution:
+Restart payment-api pods.
+Increase database max_connections.
+Scale deployment from 3 to 6 replicas.
+
+------------------------------------------------
+
+Incident: Checkout API timeout
+
+Root Cause:
+Kubernetes Horizontal Pod Autoscaler failed to scale pods during traffic surge.
+
+Resolution:
+Restart HPA controller.
+Increase minimum replicas.
+Monitor CPU utilization.
+
+------------------------------------------------
+
+Incident: Authentication failures
+
+Root Cause:
+Redis cache cluster unavailable.
+
+Resolution:
+Restart Redis cluster.
+Flush stale cache entries.
+Validate Redis health.
+
+------------------------------------------------
+
+Incident: High memory usage in microservice
+
+Root Cause:
+Memory leak introduced after recent deployment.
+
+Resolution:
+Rollback deployment.
+Analyze heap dump.
+Patch memory leak.
