@@ -494,3 +494,6 @@ Create a new ECS task-definition revision using the new image tag, then update t
 * Multi-Modal Incident Analysis
 
 ---
+## When the "tiny" alert arrives
+
+![Everything was fine until the alert showed up](assets/incident-desk-meme.gif)
