@@ -1,5 +1,12 @@
+import os
+
 import streamlit as st
 import requests
+
+api_base_url = os.getenv(
+    "API_BASE_URL",
+    "http://localhost:8000"
+).rstrip("/")
 
 st.title(
     "AI Incident Resolution Platform"
@@ -33,9 +40,7 @@ if st.button(
     }
 
     response = requests.post(
-
-        "http://localhost:8000/incident",
-
+        f"{api_base_url}/incident",
         json=payload
     )
 
