@@ -269,6 +269,35 @@ python -m unittest discover -s tests -v
 
 The API validates incident input before starting the workflow. `incident_id` must be 1–100 characters, `title` 1–200 characters, and `description` 1–10,000 characters; leading/trailing whitespace is stripped, and unknown JSON fields are rejected. Invalid request bodies should return HTTP `422`. Descriptions containing a configured prompt-injection phrase should return HTTP `400`; neither case should invoke the analysis workflow.
 
+Quickly verify that an empty description is rejected. Run this while the API is running; it prints `PASS` only when the server returns HTTP `422`:
+
+```powershell
+$invalidBody = @{
+    incident_id = "INC-INVALID"
+    title = "Test invalid input"
+    description = "   "
+} | ConvertTo-Json
+
+$statusCode = 200
+try {
+    Invoke-WebRequest -Method Post -Uri "http://localhost:8000/incident" `
+      -ContentType "application/json" `
+      -Body $invalidBody `
+      -ErrorAction Stop
+} catch {
+    if ($_.Exception.Response) {
+        $statusCode = [int]$_.Exception.Response.StatusCode
+    } else {
+        throw
+    }
+}
+
+if ($statusCode -ne 422) {
+    throw "FAIL: expected HTTP 422, got HTTP $statusCode."
+}
+Write-Host "PASS: API rejected the empty description with HTTP 422."
+```
+
 Check those request-validation behaviors without calling the model:
 
 ```powershell
