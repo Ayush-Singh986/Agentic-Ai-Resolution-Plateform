@@ -16,7 +16,7 @@ class IncidentState(TypedDict):
     retrieved_context: List[str]
 
     root_cause: str
-    remediation_plan: str
+    remediation_plan: List[str]
 
     confidence_score: float
 

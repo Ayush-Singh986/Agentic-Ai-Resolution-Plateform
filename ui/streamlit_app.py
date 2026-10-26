@@ -1,4 +1,5 @@
 import html
+import json
 import os
 
 import requests
@@ -599,8 +600,14 @@ if st.session_state.analysis_error:
 result = st.session_state.analysis_result
 if result:
     root_cause = html.escape(result.get("root_cause") or "No root cause was returned.")
-    remediation_plan = html.escape(
-        result.get("remediation_plan") or "No remediation plan was returned."
+    plan = result.get("remediation_plan") or []
+    remediation_plan = (
+        "<br>".join(
+            f"{index}. {html.escape(str(step))}"
+            for index, step in enumerate(plan, start=1)
+        )
+        if isinstance(plan, list)
+        else html.escape(str(plan))
     )
     st.markdown('<div class="result-heading">Analysis overview</div>', unsafe_allow_html=True)
     metric_columns = st.columns(3)
@@ -624,6 +631,25 @@ if result:
         st.markdown(
             f'<div class="result-card">{remediation_plan}</div>',
             unsafe_allow_html=True,
+        )
+    st.warning(
+        "Recommendations are advisory only. A human must review them; "
+        "this application does not execute remediation."
+    )
+    evidence = result.get("evidence") or []
+    with st.expander("View retrieved knowledge-base evidence"):
+        if evidence:
+            for item in evidence:
+                st.markdown(f"- {item}")
+        else:
+            st.info("No matching knowledge-base evidence was retrieved.")
+    ticket_draft = result.get("ticket_draft")
+    if ticket_draft:
+        st.download_button(
+            "Download local ticket draft (JSON)",
+            data=json.dumps(ticket_draft, indent=2),
+            file_name=f"{result.get('incident_id', 'incident')}-ticket-draft.json",
+            mime="application/json",
         )
     with st.expander("View full analysis response"):
         st.json(result)

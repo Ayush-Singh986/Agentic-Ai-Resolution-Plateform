@@ -4,7 +4,8 @@ from fastapi import APIRouter
 from fastapi import HTTPException
 
 from app.schemas.incident import (
-    IncidentRequest
+    IncidentRequest,
+    IncidentResponse,
 )
 
 from app.security.pii_masking import (
@@ -43,7 +44,10 @@ def health():
     }
 
 
-@router.post("/incident")
+@router.post(
+    "/incident",
+    response_model=IncidentResponse,
+)
 
 def process_incident(
         request: IncidentRequest
@@ -85,7 +89,7 @@ def process_incident(
 
         "root_cause": "",
 
-        "remediation_plan": "",
+        "remediation_plan": [],
 
         "confidence_score": 0.0,
 

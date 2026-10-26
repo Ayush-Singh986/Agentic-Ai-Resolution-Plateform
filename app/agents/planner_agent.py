@@ -37,21 +37,23 @@ def run_planner_agent(state):
     )
 
     try:
+        plan = json.loads(response.content)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "The planner returned invalid JSON; no remediation plan was produced."
+        ) from exc
 
-        plan = json.loads(
-            response.content
+    if (
+        not isinstance(plan, list)
+        or len(plan) > 5
+        or not all(
+            isinstance(step, str) and step.strip()
+            for step in plan
         )
-
-    except Exception:
-
-        plan = [
-
-            "Restart service",
-
-            "Scale deployment",
-
-            "Monitor metrics"
-        ]
+    ):
+        raise ValueError(
+            "The planner response must be a JSON array of up to five non-empty steps."
+        )
 
     state["remediation_plan"] = plan
 

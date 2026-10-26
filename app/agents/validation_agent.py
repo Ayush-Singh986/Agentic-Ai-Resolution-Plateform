@@ -13,12 +13,15 @@ def run_validation_agent(state):
         state["retrieved_context"]
     )
 
-    hallucinated = check_hallucination(
-        state["root_cause"],
-        context
+    hallucinated = (
+        not context
+        or check_hallucination(
+            state["root_cause"],
+            context,
+        )
     )
 
-    retrieval_score = 0.90
+    retrieval_score = 0.90 if context else 0.0
 
     validation_score = 0.95 \
         if not hallucinated else 0.60
@@ -34,6 +37,6 @@ def run_validation_agent(state):
 
     state["confidence_score"] = confidence
 
-    state["requires_human_review"] = (hallucinated or confidence < 0.80)
+    state["requires_human_review"] = True
 
     return state
