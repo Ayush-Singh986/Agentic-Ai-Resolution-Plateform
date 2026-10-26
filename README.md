@@ -232,11 +232,11 @@ ai-incident-resolution-platform/
 
 ---
 
-# Local development and tests
+# Local development and tests (not an AWS deployment method)
 
 Requirements: Python 3.11+, a Groq API key, and internet access for the initial sentence-transformer model download.
 
-The AWS deployment procedure is documented below and uses Terraform. The following commands are for local development and verification only.
+The following commands are only for local development and verification. The single deployment procedure for this project is the Terraform-based AWS deployment below.
 
 ```powershell
 python -m venv .venv
@@ -326,31 +326,52 @@ Then submit a valid incident from the UI or `/docs`. A successful response shoul
 
 # Deploy to AWS with Terraform
 
-This is the recommended AWS deployment path. It creates the application's ECR repository, a two-AZ VPC, an internet-facing ALB with HTTPS, private ECS task subnets, one Fargate task containing the Streamlit UI and FastAPI API, CloudWatch logs and monitoring, and narrowly scoped IAM roles. The Groq API key is read from AWS Secrets Manager.
+This is the project's AWS deployment procedure. It creates the application's ECR repository, a two-AZ VPC, an internet-facing ALB with HTTPS, private ECS task subnets, one Fargate task containing the Streamlit UI and FastAPI API, CloudWatch logs and monitoring, and narrowly scoped IAM roles. The Groq API key is read from AWS Secrets Manager. There is no separate manual-console deployment procedure in this guide.
 
 This is a small, single-task starting point—not a highly available or formally CIS-certified system. It follows selected CIS-aligned practices, including private task networking, restricted ingress, TLS, image scanning, immutable image tags, scoped secret access, and VPC Flow Logs. Apply your organization's complete CIS AWS Foundations Benchmark and compliance requirements separately.
 
-## Prerequisites and account preparation
+## 1. Start from a fresh checkout
 
-1. Install Terraform 1.6+, AWS CLI v2, and Docker Desktop. Confirm that Docker is running.
-2. Configure AWS CLI using IAM Identity Center/SSO or another short-lived credential provider. Do not use root credentials or long-lived access keys for routine deployment.
-3. Choose one AWS region. The example uses `ap-south-1`; use that same region for the ACM certificate, Secrets Manager secret, ECS, and Terraform.
-4. Have a DNS name and an **issued** ACM certificate in the selected region that covers that name. If using Route 53, identify the hosted-zone ID. Without Route 53, you must create a DNS alias/CNAME to the ALB after deployment.
-5. Before deployment, harden the AWS account: enable MFA on the root user, do not create root access keys, enable multi-region CloudTrail with protected log storage, and enable AWS Security Hub/Config checks for the CIS benchmark that applies to your account. In Security Hub, enable the CIS AWS Foundations Benchmark standard available for your account/region and review its failed controls. Terraform provisions application resources; it does not configure these account-wide controls.
-6. In the AWS console, create a Secrets Manager secret (for example, `incident-resolution/groq-api-key`) whose secret value is your Groq API key. Copy the **secret ARN**, not the value. Do not paste the secret into Terraform files, command history, or source control.
-7. Choose the allowed client CIDR ranges. Use your corporate/VPN public egress IP with `/32` for a restricted deployment. Set `0.0.0.0/0` only if the application is intended to be publicly reachable.
-
-Verify the AWS identity and region in PowerShell:
+Install Git, AWS CLI v2, Terraform 1.6 or later, and Docker Desktop. Start Docker Desktop, then open PowerShell and clone the repository:
 
 ```powershell
-aws sts get-caller-identity
-$AWS_REGION = "ap-south-1"
-$env:AWS_DEFAULT_REGION = $AWS_REGION
+git clone https://github.com/Ayush-Singh986/Agentic-Ai-Resolution-Plateform.git
+Set-Location .\Agentic-Ai-Resolution-Plateform
+
+git --version
+aws --version
+terraform version
+docker version
+docker info
 ```
 
-## Configure and validate Terraform
+`docker info` should complete successfully; if it cannot connect to the daemon, start Docker Desktop before continuing.
 
-From the repository root:
+## 2. Sign in to AWS and prepare account resources
+
+Use AWS IAM Identity Center/SSO or another short-lived credential provider. Do not use root credentials or long-lived access keys for routine deployment. For IAM Identity Center, configure a profile interactively and sign in:
+
+```powershell
+aws configure sso --profile incident-resolution
+aws sso login --profile incident-resolution
+$env:AWS_PROFILE = "incident-resolution"
+
+$AWS_REGION = "ap-south-1"
+$env:AWS_DEFAULT_REGION = $AWS_REGION
+aws sts get-caller-identity
+```
+
+Choose one AWS region and use it for all regional resources. Before continuing:
+
+1. Create or choose a DNS name for the application and request/validate an **issued ACM certificate** that covers that name in `$AWS_REGION`. Terraform uses the certificate for HTTPS.
+2. In **AWS Secrets Manager** in that region, store your Groq API key as a secret named `incident-resolution/groq-api-key`. Copy its **Secret ARN**; never put the key itself in Terraform variables, command history, or source control.
+3. Choose the application domain, the trusted client public IP/CIDR range (prefer your VPN/corporate egress IP with `/32`), and optional CloudWatch alarm/budget email addresses. Use `0.0.0.0/0` only if the site is meant to be public.
+4. If you want Terraform to create the DNS record, identify the Route 53 hosted-zone ID for the domain. Without Route 53, create the DNS alias/CNAME to the ALB after deployment.
+5. For account security, enable root MFA, avoid root access keys, and use CloudTrail and your organization's applicable AWS security baseline. These account-level settings are not created by this application stack.
+
+## 3. Configure and validate Terraform
+
+From the repository root, move into the Terraform directory and initialize the providers:
 
 ```powershell
 Set-Location .\infra\terraform
@@ -359,28 +380,33 @@ terraform fmt -check -recursive
 terraform validate
 ```
 
-Set Terraform inputs in the current PowerShell session. Replace the example secret/certificate ARNs, domain, and CIDR with your real values. Set alarm and budget email addresses if you want notifications; both are optional, but recommended for a running deployment.
+Set the Terraform variables in the same PowerShell session. Replace every example value with your AWS Secret ARN, ACM certificate ARN, real DNS name, and trusted client CIDR. Alarm and budget email variables are optional.
 
 ```powershell
 $env:TF_VAR_aws_region = $AWS_REGION
-$env:TF_VAR_groq_secret_arn = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:incident-resolution/groq-api-key-AbCdEf"
-$env:TF_VAR_certificate_arn = "arn:aws:acm:ap-south-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
-$env:TF_VAR_application_domain_name = "incidents.example.com"
-$env:TF_VAR_allowed_client_cidrs = '["203.0.113.10/32"]'
+$env:TF_VAR_groq_secret_arn = "<your-groq-secret-arn>"
+$env:TF_VAR_certificate_arn = "<your-issued-acm-certificate-arn>"
+$env:TF_VAR_application_domain_name = "<your-domain-name>"
+$env:TF_VAR_allowed_client_cidrs = '["<your-public-ip>/32"]'
+```
+
+For optional CloudWatch alarm and AWS budget email notifications, set real email addresses and confirm the SNS subscription email after deployment:
+
+```powershell
 $env:TF_VAR_alarm_email = "oncall@example.com"
 $env:TF_VAR_budget_alert_email = "cloud-owner@example.com"
 $env:TF_VAR_monthly_budget_usd = "100"
 ```
 
-To have Terraform create a DNS alias, set the hosted zone ID as well:
+Do not set those optional variables if you do not want email notifications. To have Terraform create a Route 53 DNS alias, set the hosted-zone ID:
 
 ```powershell
 $env:TF_VAR_route53_zone_id = "Z0123456789EXAMPLE"
 ```
 
-To use a customer-managed KMS key for the secret, also set `TF_VAR_groq_kms_key_arn` to that key's ARN. The task execution role receives decrypt access only to the supplied key.
+Replace the example hosted-zone ID with your own. If you do not use Route 53, leave `TF_VAR_route53_zone_id` unset and create the DNS alias/CNAME to the ALB after deployment. If your Groq secret uses a customer-managed KMS key, also set `$env:TF_VAR_groq_kms_key_arn` to its ARN.
 
-## Build, push, and deploy
+## 4. Build, push, and deploy
 
 Terraform needs the application image to exist before it can start ECS. First create just the ECR repository:
 
@@ -422,7 +448,7 @@ Review the proposed changes before confirming the apply. Terraform creates one 2
 
 If `alarm_email` was set, confirm the AWS SNS subscription email before expecting alarm notifications. If `budget_alert_email` was set, AWS Budgets sends a separate monthly cost notification at 80% of the configured limit. Budget notices are not spending caps.
 
-## Verify the service
+## 5. Verify the service
 
 Open the `application_url` output and verify the UI loads. Then check the API and API documentation:
 
@@ -442,7 +468,7 @@ Invoke-RestMethod -Method Post -Uri "$APP_URL/incident" `
 
 The first API request can be slower while the model and workflow initialize. Check ECS service events and the API/UI log streams if either target is unhealthy.
 
-## Configure and use AWS monitoring
+## 6. Configure and use AWS monitoring
 
 The Terraform stack provisions the following:
 
@@ -481,7 +507,7 @@ After the deployment:
 
 The application also starts a Prometheus exporter on port `8001`, exposing `incident_requests_total` and `incident_latency_seconds`. This port is intentionally not open in the task security group and is not published by the ALB. The AWS dashboard/alarms above use AWS-managed ECS and ALB metrics, not these custom application metrics. To collect custom metrics, deploy a Prometheus-compatible collector in the VPC, allow port `8001` only from that collector's security group, configure it to scrape the ECS task IPs, and protect its dashboard/endpoint. Do not expose port `8001` to the internet. The Grafana JSON in `monitoring/` is a dashboard definition; import it into a separately configured Grafana instance if needed.
 
-## Update the application
+## 7. Update the application
 
 ECR tags are immutable. For each release, set a new tag, build and push it, and update Terraform to use it:
 
@@ -496,7 +522,7 @@ terraform apply -var="image_tag=$IMAGE_TAG"
 
 Keep the same `TF_VAR_*` values in the current shell when running Terraform. The ECS deployment circuit breaker is enabled and rolls back a failed deployment.
 
-## Cost, state, security, and cleanup
+## 8. Cost, state, security, and cleanup
 
 - The ALB, NAT Gateway, Fargate task, CloudWatch ingestion/storage, data transfer, and ECR storage incur charges. The shared single NAT Gateway reduces fixed NAT cost but is a single-AZ dependency; the single ECS task is not highly available. Check current pricing before deployment.
 - Set `budget_alert_email` and an appropriate `monthly_budget_usd`, and delete the stack when it is no longer needed. Notifications may arrive after spend has occurred.
@@ -510,7 +536,7 @@ Keep the same `TF_VAR_*` values in the current shell when running Terraform. The
 
 Redis and Kafka are not included in this deployment. The current optional integrations use localhost defaults and are not durable/shared in ECS; configure and secure remote endpoints in the application before enabling them.
 
-## Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Where to look |
 | --- | --- |
