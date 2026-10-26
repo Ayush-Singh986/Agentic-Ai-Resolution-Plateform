@@ -23,7 +23,7 @@ class Settings(BaseModel):
         "localhost:9092"
     )
 
-    AWS_REGION: str = os.getenv("AWS_REGION", "ap-south-1")
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     ECS_CLUSTER_NAME: str | None = os.getenv("ECS_CLUSTER_NAME")
     ECS_SERVICE_NAME: str | None = os.getenv("ECS_SERVICE_NAME")
     REMEDIATION_TABLE_NAME: str | None = os.getenv(

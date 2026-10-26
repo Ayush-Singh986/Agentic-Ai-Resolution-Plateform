@@ -362,7 +362,7 @@ aws configure sso --profile incident-resolution
 aws sso login --profile incident-resolution
 $env:AWS_PROFILE = "incident-resolution"
 
-$AWS_REGION = "ap-south-1"
+$AWS_REGION = "us-east-1"
 $env:AWS_DEFAULT_REGION = $AWS_REGION
 aws sts get-caller-identity
 ```

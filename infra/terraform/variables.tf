@@ -7,7 +7,7 @@ variable "app_name" {
 variable "aws_region" {
   description = "AWS region for all regional resources. The ACM certificate must be in this region."
   type        = string
-  default     = "ap-south-1"
+  default     = "us-east-1"
 }
 
 variable "image_tag" {
