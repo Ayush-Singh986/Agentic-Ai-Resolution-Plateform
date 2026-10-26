@@ -6,6 +6,14 @@ This Python application helps an SRE or operations engineer investigate an IT in
 
 It is an **incident-analysis assistant**, not an autonomous repair system: recommendations are returned for an engineer to review; the application does not change production systems, open tickets, or route a case to a human-review queue.
 
+## Demo video
+
+<p align="center">
+  <video src="./brag-output-2026-10-26-092043/brag.mp4" width="720" controls playsinline muted></video>
+</p>
+
+This short launch video shows the Incident Desk flow for a sample payment API timeout incident, from intake through triage, investigation, and engineer-review guidance.
+
 ## Business problem it addresses
 
 When a service fails, responders often spend valuable time manually sorting incident reports, finding relevant runbooks or past knowledge, forming a root-cause hypothesis, and deciding what to investigate next. This creates operational toil, inconsistent triage, repeated investigation of similar symptoms, and potentially longer mean time to resolution (MTTR).

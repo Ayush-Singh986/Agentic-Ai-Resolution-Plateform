@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "historyId": "cab6e28a-3346-43d0-9eff-7ce4d9131f2b",
+  "currentRevision": "e25412e8-aceb-4c3c-a399-d8d07ee187b1",
+  "pendingChanges": false,
+  "files": {
+    "AGENTS.md": {
+      "hash": "1b36171117cb7c18f4100a0db6a3782ff2e096115995733200445cc2e80a4060",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\1b\\1b36171117cb7c18f4100a0db6a3782ff2e096115995733200445cc2e80a4060"
+    },
+    "CLAUDE.md": {
+      "hash": "1b36171117cb7c18f4100a0db6a3782ff2e096115995733200445cc2e80a4060",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\1b\\1b36171117cb7c18f4100a0db6a3782ff2e096115995733200445cc2e80a4060"
+    },
+    "assets/sfx/impact/impactSoft_medium_001.ogg": {
+      "hash": "7642a4fd43e547afe4f7adfadb3dabb681c0ff512f52c1674bae30a726841faf",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\76\\7642a4fd43e547afe4f7adfadb3dabb681c0ff512f52c1674bae30a726841faf"
+    },
+    "assets/sfx/interface/click_003.ogg": {
+      "hash": "2fa929138bc3a0f432696588f66eac94b8f6d463905ec8808c6461ce4b054292",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\2f\\2fa929138bc3a0f432696588f66eac94b8f6d463905ec8808c6461ce4b054292"
+    },
+    "hyperframes.json": {
+      "hash": "35a6d4ea79ebe911f0d81705f7aace5d8ff0316b745b0311d56af50c9c237cb7",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\35\\35a6d4ea79ebe911f0d81705f7aace5d8ff0316b745b0311d56af50c9c237cb7"
+    },
+    "index.html": {
+      "hash": "37ee75eb4a89b1371a8d037290dab2a61dd9a4bb4332cd9907dabcb086a443df",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\37\\37ee75eb4a89b1371a8d037290dab2a61dd9a4bb4332cd9907dabcb086a443df"
+    },
+    "meta.json": {
+      "hash": "d6e48e80e284df641d15abdde2a784be09da22bf286d19eff6d3a276fed3ead7",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\d6\\d6e48e80e284df641d15abdde2a784be09da22bf286d19eff6d3a276fed3ead7"
+    },
+    "package.json": {
+      "hash": "ee3a940cf9f4478839af1fcae7f9192bc7dd5898d1563d665743789860bf6212",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\ee\\ee3a940cf9f4478839af1fcae7f9192bc7dd5898d1563d665743789860bf6212"
+    },
+    "assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3": {
+      "hash": "aa56ab1cdcbef6b05566c6a7c114323078580ccf6a740a9e6c6b6c4b40b4389f",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\aa\\aa56ab1cdcbef6b05566c6a7c114323078580ccf6a740a9e6c6b6c4b40b4389f"
+    },
+    "render-help.txt": {
+      "hash": "646c0240239896f006b82d3feeb148a8583a2cb4202078047433eef3b0dbcefe",
+      "content": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\64\\646c0240239896f006b82d3feeb148a8583a2cb4202078047433eef3b0dbcefe"
+    }
+  },
+  "revisions": {
+    "5adfb124-c884-4c8c-9e5d-9807d9131d6c": {
+      "actor": {
+        "kind": "outside",
+        "name": "Outside"
+      },
+      "label": "Changed outside the app",
+      "startedAt": 1792994088922,
+      "endedAt": 1792994088924,
+      "files": {
+        "index.html": {
+          "before": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\9f\\9fa6ed3712ed4af9e4e32b1216956d98b138edbd9a1a68136aac3543b89860f2",
+          "after": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\37\\37ee75eb4a89b1371a8d037290dab2a61dd9a4bb4332cd9907dabcb086a443df"
+        }
+      }
+    },
+    "e25412e8-aceb-4c3c-a399-d8d07ee187b1": {
+      "actor": {
+        "kind": "outside",
+        "name": "Outside"
+      },
+      "label": "Changed outside the app",
+      "startedAt": 1792994233477,
+      "endedAt": 1792994233481,
+      "files": {
+        "render-help.txt": {
+          "before": null,
+          "after": "C:\\Users\\Ayush Singh\\.cache\\hyperframes\\history\\cab6e28a-3346-43d0-9eff-7ce4d9131f2b\\blobs\\64\\646c0240239896f006b82d3feeb148a8583a2cb4202078047433eef3b0dbcefe"
+        }
+      }
+    }
+  },
+  "checks": {
+    "latest": {
+      "revision": null,
+      "id": "3ce0447a-aac5-4ba3-ab0d-10dc7e28a999"
+    },
+    "revisions": {
+      "5adfb124-c884-4c8c-9e5d-9807d9131d6c": [
+        {
+          "id": "da51ee6e-fec1-48b5-9f48-6a0815a6a553",
+          "scope": "project",
+          "metadata": {
+            "ok": false,
+            "browserSkipped": false,
+            "options": {
+              "samples": 9,
+              "atTransitions": false,
+              "maxIssues": 80,
+              "collapseStatic": true,
+              "tolerance": 2,
+              "timeout": 3000,
+              "contrast": true,
+              "strict": false,
+              "snapshots": false,
+              "browserGpuMode": "auto"
+            }
+          },
+          "createdAt": 1792994105405,
+          "contentHash": "645685d4fbb9b5795bb4acb458761f65ad94db018e857beff97c1c6ddd3fd9d9",
+          "revision": "5adfb124-c884-4c8c-9e5d-9807d9131d6c",
+          "inputFingerprint": "de7725da2ddf035aff19992c8c6cb864cc882394f9959c6ff4dbb487a38838e2",
+          "inputScope": "local-project-files",
+          "attribution": "recorded-revision",
+          "status": "cleaned",
+          "cleanedAfterRender": "27a5cb9f-d2b0-4c7e-b6eb-7f098364ab2a"
+        }
+      ]
+    },
+    "unversioned": [
+      {
+        "id": "3ce0447a-aac5-4ba3-ab0d-10dc7e28a999",
+        "scope": "project",
+        "report": "D:\\agentic-ai-incident-resolution-platform-main\\agentic-ai-incident-resolution-platform-main\\brag-output-2026-10-26-092043\\composition\\.hyperframes\\artifacts\\checks\\3ce0447a-aac5-4ba3-ab0d-10dc7e28a999.json",
+        "metadata": {
+          "ok": false,
+          "browserSkipped": true,
+          "options": {
+            "samples": 9,
+            "atTransitions": false,
+            "maxIssues": 80,
+            "collapseStatic": true,
+            "tolerance": 2,
+            "timeout": 3000,
+            "contrast": true,
+            "strict": false,
+            "snapshots": false,
+            "browserGpuMode": "auto"
+          }
+        },
+        "createdAt": 1792993823972,
+        "contentHash": "5ec9b49a29847e79a5e5dd959da59520dfac029a06064b929723ce15f9b03f4e",
+        "revision": null,
+        "inputFingerprint": "8ce81b2cea0f9c3738170562c284f791b08e264367a2f24443dfe2800fd52050",
+        "inputScope": "local-project-files",
+        "attribution": "unversioned"
+      }
+    ]
+  },
+  "snapshots": {
+    "latest": null,
+    "revisions": {},
+    "unversioned": []
+  },
+  "renders": {
+    "latest": {
+      "id": "27a5cb9f-d2b0-4c7e-b6eb-7f098364ab2a",
+      "completedAt": 1792994315184,
+      "output": "D:\\agentic-ai-incident-resolution-platform-main\\agentic-ai-incident-resolution-platform-main\\brag-output-2026-10-26-092043\\brag.mp4",
+      "status": "completed",
+      "revision": "e25412e8-aceb-4c3c-a399-d8d07ee187b1"
+    },
+    "retainedRevisions": [
+      "e25412e8-aceb-4c3c-a399-d8d07ee187b1"
+    ]
+  },
+  "pendingArtifactCleanup": []
+}
