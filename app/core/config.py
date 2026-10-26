@@ -23,6 +23,28 @@ class Settings(BaseModel):
         "localhost:9092"
     )
 
+    AWS_REGION: str = os.getenv("AWS_REGION", "ap-south-1")
+    ECS_CLUSTER_NAME: str | None = os.getenv("ECS_CLUSTER_NAME")
+    ECS_SERVICE_NAME: str | None = os.getenv("ECS_SERVICE_NAME")
+    REMEDIATION_TABLE_NAME: str | None = os.getenv(
+        "REMEDIATION_TABLE_NAME"
+    )
+    COGNITO_USER_POOL_ID: str | None = os.getenv(
+        "COGNITO_USER_POOL_ID"
+    )
+    COGNITO_APP_CLIENT_ID: str | None = os.getenv(
+        "COGNITO_APP_CLIENT_ID"
+    )
+    COGNITO_ISSUER_URL: str | None = os.getenv("COGNITO_ISSUER_URL")
+    COGNITO_HOSTED_UI_DOMAIN: str | None = os.getenv(
+        "COGNITO_HOSTED_UI_DOMAIN"
+    )
+    APP_PUBLIC_URL: str | None = os.getenv("APP_PUBLIC_URL")
+    COGNITO_APPROVER_GROUP: str = os.getenv(
+        "COGNITO_APPROVER_GROUP",
+        "IncidentApprovers",
+    )
+
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
 

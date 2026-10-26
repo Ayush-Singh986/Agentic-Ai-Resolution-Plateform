@@ -1,6 +1,10 @@
+import base64
+import hashlib
 import html
 import json
 import os
+import secrets
+from urllib.parse import urlencode
 
 import requests
 import streamlit as st
@@ -8,12 +12,93 @@ import streamlit as st
 
 api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
+
+def cognito_login_url():
+    hosted_domain = os.getenv("COGNITO_HOSTED_UI_DOMAIN")
+    client_id = os.getenv("COGNITO_APP_CLIENT_ID")
+    public_url = os.getenv("APP_PUBLIC_URL")
+    if not hosted_domain or not client_id or not public_url:
+        return None
+
+    if "oauth_state" not in st.session_state:
+        st.session_state.oauth_state = secrets.token_urlsafe(32)
+        st.session_state.oauth_verifier = secrets.token_urlsafe(64)
+
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(
+            st.session_state.oauth_verifier.encode("ascii")
+        ).digest()
+    ).rstrip(b"=").decode("ascii")
+    redirect_uri = f"{public_url.rstrip('/')}/"
+    parameters = urlencode(
+        {
+            "client_id": client_id,
+            "response_type": "code",
+            "scope": "openid email",
+            "redirect_uri": redirect_uri,
+            "state": st.session_state.oauth_state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+    )
+    return f"{hosted_domain.rstrip('/')}/oauth2/authorize?{parameters}"
+
+
+def process_cognito_callback():
+    code = st.query_params.get("code")
+    if not code:
+        return None
+
+    expected_state = st.session_state.get("oauth_state")
+    returned_state = st.query_params.get("state")
+    verifier = st.session_state.get("oauth_verifier")
+    if not expected_state or returned_state != expected_state or not verifier:
+        st.query_params.clear()
+        return "Sign-in failed: OAuth state verification did not match. Try again."
+
+    hosted_domain = os.getenv("COGNITO_HOSTED_UI_DOMAIN")
+    client_id = os.getenv("COGNITO_APP_CLIENT_ID")
+    public_url = os.getenv("APP_PUBLIC_URL")
+    if not hosted_domain or not client_id or not public_url:
+        return "Sign-in failed: AWS Cognito is not configured for this UI."
+
+    try:
+        response = requests.post(
+            f"{hosted_domain.rstrip('/')}/oauth2/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": client_id,
+                "code": code,
+                "redirect_uri": f"{public_url.rstrip('/')}/",
+                "code_verifier": verifier,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        token_data = response.json()
+        id_token = token_data.get("id_token")
+        if not id_token:
+            return "Sign-in failed: Cognito did not return an ID token."
+        st.session_state.cognito_id_token = id_token
+        st.session_state.pop("oauth_state", None)
+        st.session_state.pop("oauth_verifier", None)
+        st.query_params.clear()
+        st.rerun()
+    except requests.RequestException:
+        st.query_params.clear()
+        return "Sign-in failed: could not complete the Cognito token exchange."
+    return None
+
+
 st.set_page_config(
     page_title="Incident Desk | AI Ops",
     page_icon="✳",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+cognito_notice = process_cognito_callback()
 
 st.markdown(
     """
@@ -587,6 +672,7 @@ if submitted:
             response.raise_for_status()
             st.session_state.analysis_result = response.json()
             st.session_state.analysis_error = None
+            st.session_state.pop("remediation_request", None)
         except requests.exceptions.JSONDecodeError as exc:
             st.session_state.analysis_result = None
             st.session_state.analysis_error = f"The incident API returned invalid JSON: {exc}"
@@ -596,6 +682,9 @@ if submitted:
 
 if st.session_state.analysis_error:
     st.error(st.session_state.analysis_error)
+
+if cognito_notice:
+    st.error(cognito_notice)
 
 result = st.session_state.analysis_result
 if result:
@@ -633,8 +722,8 @@ if result:
             unsafe_allow_html=True,
         )
     st.warning(
-        "Recommendations are advisory only. A human must review them; "
-        "this application does not execute remediation."
+        "Recommendations are advisory. Production changes are only submitted "
+        "after a different authenticated approver explicitly approves a fixed ECS action."
     )
     evidence = result.get("evidence") or []
     with st.expander("View retrieved knowledge-base evidence"):
@@ -651,5 +740,289 @@ if result:
             file_name=f"{result.get('incident_id', 'incident')}-ticket-draft.json",
             mime="application/json",
         )
+
+    st.markdown('<div class="result-heading">Human-approved AWS remediation</div>', unsafe_allow_html=True)
+    st.caption(
+        "Only predefined restart or rollback actions for the configured ECS service "
+        "are available. AI-generated text is never run as a command."
+    )
+    login_url = cognito_login_url()
+    id_token = st.session_state.get("cognito_id_token")
+    if not login_url:
+        st.error(
+            "Approval is not configured. Set the Cognito UI variables in the ECS task definition."
+        )
+    elif not id_token:
+        st.link_button("Sign in with AWS Cognito", login_url)
+    else:
+        st.success("Signed in. The API restricts approval to the Cognito IncidentApprovers group.")
+        selected_action = st.selectbox(
+            "Choose a predefined action",
+            options=("restart", "rollback"),
+            format_func=lambda action: (
+                "Restart the configured ECS service"
+                if action == "restart"
+                else "Roll back to the previous active ECS task definition"
+            ),
+            key=f"remediation-action-{result.get('incident_id', 'unknown')}",
+        )
+        if st.button(
+            "Prepare action for approval",
+            key=f"prepare-remediation-{result.get('incident_id', 'unknown')}",
+        ):
+            try:
+                response = requests.post(
+                    f"{api_base_url}/remediation-requests",
+                    json={
+                        "incident_id": result["incident_id"],
+                        "action": selected_action,
+                    },
+                    headers={"Authorization": f"Bearer {id_token}"},
+                    timeout=30,
+                )
+                response.raise_for_status()
+                st.session_state.remediation_request = response.json()
+            except requests.RequestException as exc:
+                detail = ""
+                if exc.response is not None:
+                    try:
+                        detail = exc.response.json().get("detail", "")
+                    except requests.exceptions.JSONDecodeError:
+                        detail = exc.response.text
+                st.error(
+                    f"Could not prepare the remediation request: "
+                    f"{detail or exc}"
+                )
+
+        remediation_request = st.session_state.get("remediation_request")
+        if remediation_request:
+            rollout_text = ""
+            if remediation_request.get("rollout_state"):
+                rollout_text = (
+                    f"  \nECS rollout: "
+                    f"**{remediation_request['rollout_state']}**"
+                )
+            st.info(
+                f"Action: **{remediation_request['action']}**  \n"
+                f"ECS service: `{remediation_request['cluster']}` / "
+                f"`{remediation_request['service']}`  \n"
+                f"Current task definition: "
+                f"`{remediation_request['current_task_definition']}`  \n"
+                f"Target task definition: "
+                f"`{remediation_request['target_task_definition']}`  \n"
+                f"Status: **{remediation_request['status']}**"
+                f"{rollout_text}"
+            )
+            if remediation_request["status"] == "pending":
+                st.warning(
+                    "Approval causes AWS to submit this ECS deployment action. "
+                    "It is not a preview or a guarantee the deployment will become healthy."
+                )
+                confirm = st.checkbox(
+                    "I reviewed the target service and task definition.",
+                    key=f"confirm-remediation-{remediation_request['request_id']}",
+                )
+                approve_column, reject_column = st.columns(2)
+                if approve_column.button(
+                    "Approve and execute",
+                    disabled=not confirm,
+                    type="primary",
+                    key=f"approve-remediation-{remediation_request['request_id']}",
+                ):
+                    try:
+                        response = requests.post(
+                            f"{api_base_url}/remediation-requests/"
+                            f"{remediation_request['request_id']}/approve",
+                            headers={"Authorization": f"Bearer {id_token}"},
+                            timeout=30,
+                        )
+                        response.raise_for_status()
+                        st.session_state.remediation_request = response.json()
+                        st.success(
+                            "AWS accepted the action. Check ECS deployment health "
+                            "before considering the incident resolved."
+                        )
+                    except requests.RequestException as exc:
+                        detail = ""
+                        if exc.response is not None:
+                            try:
+                                detail = exc.response.json().get("detail", "")
+                            except requests.exceptions.JSONDecodeError:
+                                detail = exc.response.text
+                        st.error(
+                            f"Approval failed: {detail or exc}"
+                        )
+                if reject_column.button(
+                    "Reject request",
+                    key=f"reject-remediation-{remediation_request['request_id']}",
+                ):
+                    try:
+                        response = requests.post(
+                            f"{api_base_url}/remediation-requests/"
+                            f"{remediation_request['request_id']}/reject",
+                            headers={"Authorization": f"Bearer {id_token}"},
+                            timeout=30,
+                        )
+                        response.raise_for_status()
+                        st.session_state.remediation_request = response.json()
+                        st.info("Remediation request rejected; no ECS change was made.")
+                    except requests.RequestException as exc:
+                        detail = ""
+                        if exc.response is not None:
+                            try:
+                                detail = exc.response.json().get("detail", "")
+                            except requests.exceptions.JSONDecodeError:
+                                detail = exc.response.text
+                        st.error(
+                            f"Could not reject the request: {detail or exc}"
+                        )
+            elif remediation_request["status"] == "submitted":
+                if st.button(
+                    "Check ECS rollout status",
+                    key=f"check-remediation-{remediation_request['request_id']}",
+                ):
+                    try:
+                        response = requests.get(
+                            f"{api_base_url}/remediation-requests/"
+                            f"{remediation_request['request_id']}",
+                            headers={"Authorization": f"Bearer {id_token}"},
+                            timeout=30,
+                        )
+                        response.raise_for_status()
+                        st.session_state.remediation_request = response.json()
+                        if response.json()["status"] == "healthy":
+                            st.success(
+                                "ECS reports the deployment is healthy. Verify "
+                                "the original incident symptoms are resolved before closing the incident."
+                            )
+                        elif response.json()["status"] == "rollout_failed":
+                            st.error(
+                                "ECS reports that the rollout failed. Review ECS "
+                                "service events and CloudWatch logs."
+                            )
+                        else:
+                            st.info("The ECS rollout is still in progress.")
+                    except requests.RequestException as exc:
+                        detail = ""
+                        if exc.response is not None:
+                            try:
+                                detail = exc.response.json().get("detail", "")
+                            except requests.exceptions.JSONDecodeError:
+                                detail = exc.response.text
+                        st.error(
+                            f"Could not check ECS rollout status: {detail or exc}"
+                        )
     with st.expander("View full analysis response"):
         st.json(result)
+
+login_url = cognito_login_url()
+id_token = st.session_state.get("cognito_id_token")
+if not result and not id_token and login_url:
+    st.link_button("Sign in to review remediation requests", login_url)
+
+st.markdown('<div class="result-heading">Approver inbox</div>', unsafe_allow_html=True)
+st.caption(
+    "Members of the Cognito IncidentApprovers group can review pending requests here. "
+    "The person who created a request cannot approve it."
+)
+if id_token:
+    try:
+        response = requests.get(
+            f"{api_base_url}/remediation-requests/pending",
+            headers={"Authorization": f"Bearer {id_token}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        pending_requests = response.json().get("requests", [])
+    except requests.RequestException as exc:
+        detail = ""
+        if exc.response is not None:
+            try:
+                detail = exc.response.json().get("detail", "")
+            except requests.exceptions.JSONDecodeError:
+                detail = exc.response.text
+        st.info(
+            f"Approver inbox unavailable: {detail or exc}. "
+            "Only users in IncidentApprovers can view pending requests."
+        )
+    else:
+        if not pending_requests:
+            st.info("There are no pending remediation requests.")
+        for pending_request in pending_requests:
+            request_id = pending_request["request_id"]
+            with st.expander(
+                f"{pending_request['incident_id']} · "
+                f"{pending_request['action']} · {pending_request['service']}"
+            ):
+                st.write(f"Request ID: `{request_id}`")
+                st.write(f"Requested by: `{pending_request['created_by']}`")
+                st.write(
+                    f"Cluster / service: `{pending_request['cluster']}` / "
+                    f"`{pending_request['service']}`"
+                )
+                st.write(
+                    f"Current task definition: "
+                    f"`{pending_request['current_task_definition']}`"
+                )
+                st.write(
+                    f"Target task definition: "
+                    f"`{pending_request['target_task_definition']}`"
+                )
+                st.warning(
+                    "Approval submits this action to ECS. Verify the target and "
+                    "task definition before proceeding."
+                )
+                confirmed = st.checkbox(
+                    "I reviewed this request and its target.",
+                    key=f"inbox-confirm-{request_id}",
+                )
+                approve_column, reject_column = st.columns(2)
+                if approve_column.button(
+                    "Approve and execute",
+                    disabled=not confirmed,
+                    type="primary",
+                    key=f"inbox-approve-{request_id}",
+                ):
+                    try:
+                        approval_response = requests.post(
+                            f"{api_base_url}/remediation-requests/"
+                            f"{request_id}/approve",
+                            headers={"Authorization": f"Bearer {id_token}"},
+                            timeout=30,
+                        )
+                        approval_response.raise_for_status()
+                        st.success(
+                            "AWS accepted the action. Check ECS rollout health and "
+                            "verify the incident symptoms separately."
+                        )
+                    except requests.RequestException as exc:
+                        detail = ""
+                        if exc.response is not None:
+                            try:
+                                detail = exc.response.json().get("detail", "")
+                            except requests.exceptions.JSONDecodeError:
+                                detail = exc.response.text
+                        st.error(f"Approval failed: {detail or exc}")
+                if reject_column.button(
+                    "Reject request",
+                    key=f"inbox-reject-{request_id}",
+                ):
+                    try:
+                        rejection_response = requests.post(
+                            f"{api_base_url}/remediation-requests/"
+                            f"{request_id}/reject",
+                            headers={"Authorization": f"Bearer {id_token}"},
+                            timeout=30,
+                        )
+                        rejection_response.raise_for_status()
+                        st.info("Request rejected; no ECS change was made.")
+                    except requests.RequestException as exc:
+                        detail = ""
+                        if exc.response is not None:
+                            try:
+                                detail = exc.response.json().get("detail", "")
+                            except requests.exceptions.JSONDecodeError:
+                                detail = exc.response.text
+                        st.error(f"Could not reject the request: {detail or exc}")
+else:
+    st.info("Sign in with Cognito to access the approver inbox.")

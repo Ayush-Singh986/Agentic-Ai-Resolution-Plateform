@@ -2,6 +2,10 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}
+
 locals {
   availability_zones = slice(data.aws_availability_zones.available.names, 0, 2)
   public_subnets = {
@@ -11,6 +15,16 @@ locals {
     for index, cidr in ["10.42.10.0/24", "10.42.11.0/24"] : cidr => index
   }
   container_image = "${aws_ecr_repository.app.repository_url}:${var.image_tag}"
+  remediation_cluster_name = coalesce(
+    var.ecs_remediation_cluster_name,
+    var.app_name,
+  )
+  remediation_service_name = coalesce(
+    var.ecs_remediation_service_name,
+    var.app_name,
+  )
+  remediation_cluster_resource = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${split("/", local.remediation_cluster_name)[length(split("/", local.remediation_cluster_name)) - 1]}"
+  remediation_service_resource = "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${split("/", local.remediation_cluster_name)[length(split("/", local.remediation_cluster_name)) - 1]}/${local.remediation_service_name}"
   common_tags = {
     Project = var.app_name
   }
@@ -147,6 +161,84 @@ resource "aws_cloudwatch_log_group" "vpc_flow" {
   retention_in_days = var.log_retention_days
 
   tags = local.common_tags
+}
+
+resource "aws_dynamodb_table" "remediation_requests" {
+  name         = "${var.app_name}-remediation-requests"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "request_id"
+
+  attribute {
+    name = "request_id"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "expires_at"
+    enabled        = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cognito_user_pool" "app" {
+  name                     = "${var.app_name}-users"
+  username_attributes      = ["email"]
+  auto_verified_attributes = ["email"]
+
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+  }
+
+  password_policy {
+    minimum_length                   = 12
+    require_lowercase                = true
+    require_numbers                  = true
+    require_symbols                  = true
+    require_uppercase                = true
+    temporary_password_validity_days = 7
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cognito_user_pool_domain" "app" {
+  domain       = var.cognito_domain_prefix
+  user_pool_id = aws_cognito_user_pool.app.id
+}
+
+resource "aws_cognito_user_pool_client" "app" {
+  name                                 = "${var.app_name}-web"
+  user_pool_id                         = aws_cognito_user_pool.app.id
+  generate_secret                      = false
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email"]
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = ["https://${var.application_domain_name}/"]
+  logout_urls                          = ["https://${var.application_domain_name}/"]
+  enable_token_revocation              = true
+  prevent_user_existence_errors        = "ENABLED"
+
+  token_validity_units {
+    id_token = "minutes"
+  }
+
+  id_token_validity = 60
+}
+
+resource "aws_cognito_user_group" "approvers" {
+  name         = "IncidentApprovers"
+  description  = "Users permitted to approve predefined ECS remediation actions."
+  user_pool_id = aws_cognito_user_pool.app.id
 }
 
 data "aws_iam_policy_document" "flow_logs_assume_role" {
@@ -384,7 +476,14 @@ resource "aws_lb_listener_rule" "api" {
 
   condition {
     path_pattern {
-      values = ["/incident", "/health", "/docs*", "/openapi.json", "/redoc*"]
+      values = [
+        "/incident",
+        "/health",
+        "/docs*",
+        "/openapi.json",
+        "/redoc*",
+        "/remediation-requests*",
+      ]
     }
   }
 }
@@ -456,6 +555,43 @@ resource "aws_iam_role_policy" "execution" {
   policy = data.aws_iam_policy_document.execution.json
 }
 
+data "aws_iam_policy_document" "task_remediation" {
+  statement {
+    sid       = "InspectConfiguredEcsService"
+    actions   = ["ecs:DescribeServices"]
+    resources = [local.remediation_cluster_resource, local.remediation_service_resource]
+  }
+
+  statement {
+    sid       = "ListTaskDefinitionRevisions"
+    actions   = ["ecs:ListTaskDefinitions"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "UpdateOnlyConfiguredEcsService"
+    actions   = ["ecs:UpdateService"]
+    resources = [local.remediation_service_resource]
+  }
+
+  statement {
+    sid = "AuditPendingRemediationRequests"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+    ]
+    resources = [aws_dynamodb_table.remediation_requests.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "task_remediation" {
+  name   = "${var.app_name}-approved-remediation"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_remediation.json
+}
+
 resource "aws_ecs_cluster" "app" {
   name = var.app_name
   tags = local.common_tags
@@ -482,6 +618,16 @@ resource "aws_ecs_task_definition" "app" {
       environment = [
         { name = "MODEL_NAME", value = "llama-3.3-70b-versatile" },
         { name = "LOG_LEVEL", value = "INFO" },
+        { name = "AWS_REGION", value = var.aws_region },
+        { name = "ECS_CLUSTER_NAME", value = local.remediation_cluster_name },
+        { name = "ECS_SERVICE_NAME", value = local.remediation_service_name },
+        { name = "REMEDIATION_TABLE_NAME", value = aws_dynamodb_table.remediation_requests.name },
+        { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.app.id },
+        { name = "COGNITO_APP_CLIENT_ID", value = aws_cognito_user_pool_client.app.id },
+        { name = "COGNITO_ISSUER_URL", value = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.app.id}" },
+        { name = "COGNITO_APPROVER_GROUP", value = aws_cognito_user_group.approvers.name },
+        { name = "COGNITO_HOSTED_UI_DOMAIN", value = "https://${aws_cognito_user_pool_domain.app.domain}.auth.${var.aws_region}.amazoncognito.com" },
+        { name = "APP_PUBLIC_URL", value = "https://${var.application_domain_name}" },
       ]
       secrets = [{
         name      = "GROQ_API_KEY"
@@ -518,6 +664,15 @@ resource "aws_ecs_task_definition" "app" {
       environment = [{
         name  = "API_BASE_URL"
         value = "http://127.0.0.1:8000"
+        }, {
+        name  = "COGNITO_APP_CLIENT_ID"
+        value = aws_cognito_user_pool_client.app.id
+        }, {
+        name  = "COGNITO_HOSTED_UI_DOMAIN"
+        value = "https://${aws_cognito_user_pool_domain.app.domain}.auth.${var.aws_region}.amazoncognito.com"
+        }, {
+        name  = "APP_PUBLIC_URL"
+        value = "https://${var.application_domain_name}"
       }]
       dependsOn = [{
         containerName = "incident-api"
@@ -564,6 +719,16 @@ resource "aws_ecs_service" "app" {
     rollback = true
   }
 
+  lifecycle {
+    precondition {
+      condition = (
+        (var.ecs_remediation_cluster_name == null)
+        == (var.ecs_remediation_service_name == null)
+      )
+      error_message = "Set both ecs_remediation_cluster_name and ecs_remediation_service_name, or leave both unset."
+    }
+  }
+
   network_configuration {
     subnets          = [for subnet in aws_subnet.private : subnet.id]
     security_groups  = [aws_security_group.tasks.id]
@@ -586,6 +751,7 @@ resource "aws_ecs_service" "app" {
     aws_lb_listener.https,
     aws_lb_listener_rule.api,
     aws_iam_role_policy.execution,
+    aws_iam_role_policy.task_remediation,
   ]
 
   tags = local.common_tags

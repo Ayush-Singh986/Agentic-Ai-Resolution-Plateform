@@ -45,3 +45,42 @@ class IncidentResponse(BaseModel):
     evidence: list[str]
     ticket_draft: TicketDraft
     prompt_versions: dict[str, str]
+
+
+class RemediationActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    incident_id: str = Field(min_length=1, max_length=100)
+    action: Literal["restart", "rollback"]
+
+
+class RemediationRequestResponse(BaseModel):
+    request_id: str
+    incident_id: str
+    created_by: str
+    action: Literal["restart", "rollback"]
+    status: Literal[
+        "pending",
+        "executing",
+        "submitted",
+        "rejected",
+        "failed",
+        "stale",
+        "healthy",
+        "rollout_failed",
+    ]
+    cluster: str
+    service: str
+    current_task_definition: str
+    target_task_definition: str
+    created_at: str
+    expires_at: int
+    approved_by: str | None = None
+    approved_at: str | None = None
+    deployment_id: str | None = None
+    rollout_state: str | None = None
+    rollout_reason: str | None = None
+
+
+class RemediationRequestListResponse(BaseModel):
+    requests: list[RemediationRequestResponse]

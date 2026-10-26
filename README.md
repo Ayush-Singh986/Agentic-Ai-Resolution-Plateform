@@ -2,9 +2,11 @@
 
 ## Project summary
 
-This Python application helps an SRE or operations engineer investigate an IT incident. A user submits an incident description through a Streamlit web UI or the FastAPI endpoint. A LangGraph workflow classifies the incident, retrieves relevant passages from a local knowledge base, asks a Groq-hosted language model to suggest a root cause and remediation plan, and returns a confidence score and human-review flag.
+This Python application helps an SRE or operations engineer investigate an IT incident. A user submits an incident description through a Streamlit web UI or the FastAPI endpoint. A LangGraph workflow classifies the incident, retrieves relevant passages from a local knowledge base, asks a Groq-hosted language model to suggest a root cause and remediation plan, and returns a confidence score and human-review flag. For one configured ECS service, a signed-in user can prepare a predefined restart or rollback request; a different user in the Cognito `IncidentApprovers` group must approve before the application asks ECS to deploy it.
 
-It is an **incident-analysis assistant**, not an autonomous repair system: recommendations are returned for an engineer to review; the application does not change production systems, open tickets, or route a case to a human-review queue.
+The application does not monitor your infrastructure or automatically identify which real service caused an incident. An operator submits the report and chooses whether to request one of the allowed actions for the single configured ECS service. The application never runs AI-generated shell commands. Changes require a separate approver and are recorded in DynamoDB. ECS reporting a deployment as healthy does not prove the original incident is resolved; an engineer must verify user impact and system health.
+
+By default, that one service is this app's own ECS service. To remediate a different workload, configure its ECS cluster and service names during deployment. The app cannot automatically discover an affected service from incident text.
 
 ## Demo video
 
@@ -60,6 +62,9 @@ flowchart LR
     Response --> API
 
     API -->|logs| CW[CloudWatch Logs]
+    UI -->|Cognito PKCE sign-in| Cognito[AWS Cognito]
+    API -->|pending request and audit status| Dynamo[(DynamoDB)]
+    API -->|approved fixed restart or rollback only| ECS[AWS ECS service]
     API -. optional .-> Redis[Redis]
     API -. optional .-> Kafka[Kafka]
 ```
@@ -73,9 +78,9 @@ The AWS guide below deploys the UI and API as two containers in one ECS Fargate 
 3. The retrieval agent embeds the masked description and searches the local FAISS index built from `data/knowledge_base.txt`.
 4. The RCA and planner agents call the configured Groq model.
 5. The validation agent asks the model whether the root-cause answer is supported by retrieved context, calculates a confidence score, and flags results needing review.
-6. The execution agent assembles the analysis, retrieved evidence, and a local ticket-draft payload. The API optionally stores it in Redis and publishes a Kafka event when those integrations are available.
+6. The execution agent assembles the analysis, retrieved evidence, and a local ticket-draft payload. A signed-in user may request a predefined ECS service restart or rollback. A different authenticated member of the `IncidentApprovers` Cognito group reviews it in the approver inbox and must approve the specific target before ECS receives the action.
 
-The human-review flag is always true: recommendations are advisory and are never executed by this application. The ticket draft is returned in the response for review/download; it is not submitted to a ticket provider. Triage is currently a simple keyword classifier, and validation is an LLM-based check rather than a formal guarantee.
+The human-review flag is always true. The ticket draft is returned for review/download; it is not submitted to a ticket provider. Remediation requests expire after 24 hours, and a request is rejected as stale if the ECS task definition or deployment changes after the plan was prepared. Triage is currently a simple keyword classifier, and validation is an LLM-based check rather than a formal guarantee.
 
 ---
 
@@ -165,13 +170,13 @@ The platform provides basic input protections and output checks. These controls 
 | Prompt-injection checks | The API rejects descriptions containing configured suspicious phrases, such as “ignore previous instructions.” | This is a small phrase list, not comprehensive prompt-injection protection. |
 | Hallucination check | The configured Groq model checks whether the root-cause response is supported by retrieved context. | This is an LLM-based judgment and is not a formal correctness guarantee. |
 | Confidence score | A score is calculated from retrieval and validation scores, with a penalty when hallucination is detected. | The current values are heuristic and should not be interpreted as calibrated probabilities. |
-| Human-review flag | `requires_human_review` is always `true`. | The flag is informational; the application does not notify a reviewer or send results to an external review queue. |
+| Human-review flag | `requires_human_review` is always `true`; a remediation request requires Cognito sign-in and a separate approver in `IncidentApprovers`. | Cognito user creation and approver-group membership must be administered by an AWS operator. |
 | Evidence | Retrieved knowledge-base passages are returned in `evidence` and included in the local ticket draft. | Retrieval results may be irrelevant or incomplete; responders must check the cited text against current runbooks. |
 | Local ticket draft | A structured `ticket_draft` is returned and can be downloaded as JSON from the UI. | It is not sent to GitHub, Jira, Slack, or another external system. |
-| Remediation | The response explicitly returns `remediation_executed: false`. | The application does not make production changes; engineers must assess and perform any approved action themselves. |
+| ECS remediation | Only a predefined restart or rollback can be requested for the one configured ECS service. Another approver must explicitly approve the displayed action. | The IAM task role is scoped to that service. The app never runs AI-generated commands. ECS deployment health is not proof that the reported incident is fixed. |
 | Prompt versions | The RCA and planner prompt versions are included in the API response for traceability. | Version strings identify the prompts; they do not guarantee response quality. |
 
-The project is an incident-analysis assistant, not an autonomous repair system. Engineers must verify the analysis and recommendations against current system evidence and operational procedures before acting. The app never executes remediation.
+The project is an incident-analysis assistant with a gated remediation option, not an autonomous repair system. The application only asks ECS to perform a predefined action after a different authenticated approver approves it. Engineers must still verify the analysis and confirm that the original incident is resolved.
 
 # Observability and Monitoring
 
@@ -197,6 +202,7 @@ The Terraform AWS deployment creates a CloudWatch dashboard for ECS CPU/memory a
 | Event streaming | Kafka (optional integration) |
 | Metrics | Prometheus client |
 | Container deployment | Docker, AWS ECS Fargate |
+| Approval and authentication | AWS Cognito, DynamoDB |
 
 ---
 
@@ -387,8 +393,18 @@ $env:TF_VAR_aws_region = $AWS_REGION
 $env:TF_VAR_groq_secret_arn = "<your-groq-secret-arn>"
 $env:TF_VAR_certificate_arn = "<your-issued-acm-certificate-arn>"
 $env:TF_VAR_application_domain_name = "<your-domain-name>"
+$env:TF_VAR_cognito_domain_prefix = "<globally-unique-lowercase-prefix>"
 $env:TF_VAR_allowed_client_cidrs = '["<your-public-ip>/32"]'
 ```
+
+The Cognito prefix must be globally unique and use lowercase letters, numbers, and interior hyphens. By default, approved remediation is limited to the app's own ECS service. For a different target in the same AWS account and region, set both cluster and service names before applying; the task role will be scoped to that service:
+
+```powershell
+$env:TF_VAR_ecs_remediation_cluster_name = "<target-ecs-cluster-name>"
+$env:TF_VAR_ecs_remediation_service_name = "<target-ecs-service-name>"
+```
+
+Set both remediation target variables or leave both unset. If you set neither, do not mistake the app's default target for the workload that caused an incident.
 
 For optional CloudWatch alarm and AWS budget email notifications, set real email addresses and confirm the SNS subscription email after deployment:
 
@@ -417,15 +433,11 @@ terraform apply -target=aws_ecr_repository.app
 Authenticate Docker to ECR, build the project image for Fargate's Linux x86-64 architecture, then push the initial immutable tag:
 
 ```powershell
-$ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
-$ECR_URI = aws ecr describe-repositories `
-  --repository-names incident-resolution `
-  --region $AWS_REGION `
-  --query "repositories[0].repositoryUri" `
-  --output text
+$ECR_URI = terraform output -raw ecr_repository_url
+$ECR_REGISTRY = $ECR_URI.Split('/')[0]
 
 aws ecr get-login-password --region $AWS_REGION |
-  docker login --username AWS --password-stdin "$($ACCOUNT_ID).dkr.ecr.$($AWS_REGION).amazonaws.com"
+  docker login --username AWS --password-stdin $ECR_REGISTRY
 
 Set-Location ..\..
 docker build --platform linux/amd64 -t "${ECR_URI}:v1" .
@@ -448,6 +460,30 @@ Review the proposed changes before confirming the apply. Terraform creates one 2
 
 If `alarm_email` was set, confirm the AWS SNS subscription email before expecting alarm notifications. If `budget_alert_email` was set, AWS Budgets sends a separate monthly cost notification at 80% of the configured limit. Budget notices are not spending caps.
 
+Create two Cognito users with AWS CLI: an incident requester and a separate approver. Replace the email addresses below with the users' actual addresses. Cognito sends each user an invitation with a generated temporary password and prompts them to set a permanent password at first sign-in.
+
+```powershell
+$POOL_ID = terraform output -raw cognito_user_pool_id
+$REQUESTOR_EMAIL = "incident-requestor@example.com"
+$APPROVER_EMAIL = "incident-approver@example.com"
+
+aws cognito-idp admin-create-user `
+  --user-pool-id $POOL_ID `
+  --username $REQUESTOR_EMAIL `
+  --user-attributes "Name=email,Value=$REQUESTOR_EMAIL" "Name=email_verified,Value=true"
+
+aws cognito-idp admin-create-user `
+  --user-pool-id $POOL_ID `
+  --username $APPROVER_EMAIL `
+  --user-attributes "Name=email,Value=$APPROVER_EMAIL" "Name=email_verified,Value=true"
+aws cognito-idp admin-add-user-to-group `
+  --user-pool-id $POOL_ID `
+  --username $APPROVER_EMAIL `
+  --group-name IncidentApprovers
+```
+
+Only add trusted operators to `IncidentApprovers`. The requester must not approve their own request; the backend checks Cognito identity and group membership for every approval and rejection.
+
 ## 5. Verify the service
 
 Open the `application_url` output and verify the UI loads. Then check the API and API documentation:
@@ -467,6 +503,43 @@ Invoke-RestMethod -Method Post -Uri "$APP_URL/incident" `
 ```
 
 The first API request can be slower while the model and workflow initialize. Check ECS service events and the API/UI log streams if either target is unhealthy.
+
+To validate that malformed incident input is rejected in AWS without invoking the analysis workflow, run this and confirm the output says `PASS`:
+
+```powershell
+$invalidBody = @{
+    incident_id = "INC-INVALID"
+    title = "Invalid input check"
+    description = "   "
+} | ConvertTo-Json
+
+$statusCode = 200
+try {
+    Invoke-WebRequest -Method Post -Uri "$APP_URL/incident" `
+      -ContentType "application/json" `
+      -Body $invalidBody `
+      -ErrorAction Stop
+} catch {
+    if ($_.Exception.Response) {
+        $statusCode = [int]$_.Exception.Response.StatusCode
+    } else {
+        throw
+    }
+}
+
+if ($statusCode -ne 422) {
+    throw "FAIL: expected HTTP 422, got HTTP $statusCode."
+}
+Write-Host "PASS: API rejected the empty description with HTTP 422."
+```
+
+### Test the human-approval flow
+
+1. Sign in to the app as the requester. Submit a test incident and choose either **Restart the configured ECS service** or **Roll back to the previous active ECS task definition**, then select **Prepare action for approval**. This only stores a pending request; it does not change ECS.
+2. In a separate browser or private window, sign in as the Cognito user added to `IncidentApprovers`. Open **Approver inbox**, review the incident, target service, current task definition, and target task definition, then approve or reject it. The requester cannot approve their own request.
+3. Rejection must leave ECS unchanged. Approval submits the selected predefined action to ECS; check ECS service events and deployment status, then independently verify whether the incident symptoms are resolved.
+
+Approval triggers a real ECS deployment. Test the approved path only against a non-production service configured as the remediation target. The default target is this app's service, not the affected workload. A successful ECS rollout is not proof of incident resolution, and rollback selects an earlier ACTIVE task-definition revision—it does not guarantee that revision is safe or compatible.
 
 ## 6. Configure and use AWS monitoring
 

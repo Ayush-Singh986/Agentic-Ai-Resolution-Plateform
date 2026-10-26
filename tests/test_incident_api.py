@@ -6,6 +6,8 @@ from unittest.mock import Mock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.security.cognito_auth import require_approver, require_cognito_user
+
 
 graph_module = ModuleType("app.graph.workflow")
 graph_module.graph = Mock()
@@ -30,6 +32,7 @@ with patch.dict(
     },
 ):
     from app.api.routes import router
+    import app.api.routes as routes_module
 
 
 class IncidentApiTests(unittest.TestCase):
@@ -163,6 +166,77 @@ class IncidentApiTests(unittest.TestCase):
         self.assertEqual(
             workflow_state["description"],
             "Payment requests are timing out.",
+        )
+
+    def test_pending_remediation_inbox_requires_cognito_authentication(self):
+        response = self.client.get("/remediation-requests/pending")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_pending_remediation_inbox_requires_approver_group(self):
+        self.client.app.dependency_overrides[require_cognito_user] = lambda: {
+            "sub": "requester",
+            "cognito:groups": [],
+        }
+        try:
+            response = self.client.get("/remediation-requests/pending")
+        finally:
+            self.client.app.dependency_overrides.pop(require_cognito_user, None)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_approver_inbox_returns_pending_request_details(self):
+        pending_request = {
+            "request_id": "request-1",
+            "incident_id": "INC-1005",
+            "created_by": "requester",
+            "action": "restart",
+            "status": "pending",
+            "cluster": "incident-resolution",
+            "service": "incident-resolution",
+            "current_task_definition": "arn:aws:ecs:region:account:task-definition/app:2",
+            "target_task_definition": "arn:aws:ecs:region:account:task-definition/app:2",
+            "created_at": "2025-01-01T00:00:00+00:00",
+            "expires_at": 1735776000,
+        }
+        self.client.app.dependency_overrides[require_approver] = lambda: {
+            "sub": "approver",
+        }
+        try:
+            with patch.object(
+                routes_module,
+                "list_pending_remediation_requests",
+                return_value=[pending_request],
+            ):
+                response = self.client.get("/remediation-requests/pending")
+        finally:
+            self.client.app.dependency_overrides.pop(require_approver, None)
+
+        self.assertEqual(response.status_code, 200)
+        returned_request = response.json()["requests"][0]
+        self.assertEqual(returned_request["request_id"], "request-1")
+        self.assertEqual(returned_request["created_by"], "requester")
+        self.assertEqual(returned_request["action"], "restart")
+
+    def test_request_creator_cannot_approve_their_own_remediation(self):
+        self.client.app.dependency_overrides[require_approver] = lambda: {
+            "sub": "requester",
+        }
+        try:
+            with patch(
+                "app.services.aws_remediation.get_remediation_request",
+                return_value={"created_by": "requester"},
+            ):
+                response = self.client.post(
+                    "/remediation-requests/request-1/approve"
+                )
+        finally:
+            self.client.app.dependency_overrides.pop(require_approver, None)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"],
+            "A different approver must approve this request.",
         )
 
 

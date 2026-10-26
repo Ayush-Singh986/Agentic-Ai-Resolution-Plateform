@@ -32,3 +32,23 @@ output "cloudwatch_alarm_topic_arn" {
   description = "SNS topic ARN for application alarms, or null if alarm_email is not configured."
   value       = var.alarm_email == null ? null : aws_sns_topic.alarms[0].arn
 }
+
+output "cognito_user_pool_id" {
+  description = "Cognito user pool ID for application sign-in."
+  value       = aws_cognito_user_pool.app.id
+}
+
+output "cognito_app_client_id" {
+  description = "Public Cognito app client ID used by the Streamlit UI."
+  value       = aws_cognito_user_pool_client.app.id
+}
+
+output "cognito_hosted_ui_domain" {
+  description = "Cognito hosted UI domain used for sign-in."
+  value       = "https://${aws_cognito_user_pool_domain.app.domain}.auth.${var.aws_region}.amazoncognito.com"
+}
+
+output "remediation_target" {
+  description = "The single ECS cluster/service permitted for approved remediation."
+  value       = "${local.remediation_cluster_name}/${local.remediation_service_name}"
+}

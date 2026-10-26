@@ -38,6 +38,28 @@ variable "application_domain_name" {
   type        = string
 }
 
+variable "cognito_domain_prefix" {
+  description = "Globally unique Cognito hosted UI domain prefix for sign-in."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", var.cognito_domain_prefix))
+    error_message = "Use a 1-63 character lowercase Cognito prefix containing only letters, numbers, and interior hyphens."
+  }
+}
+
+variable "ecs_remediation_cluster_name" {
+  description = "Optional ECS cluster name for the single human-remediation target. Defaults to this application's cluster."
+  type        = string
+  default     = null
+}
+
+variable "ecs_remediation_service_name" {
+  description = "Optional ECS service name for the single human-remediation target. Defaults to this application's service."
+  type        = string
+  default     = null
+}
+
 variable "route53_zone_id" {
   description = "Optional Route 53 hosted-zone ID in which to create an ALB alias record."
   type        = string
