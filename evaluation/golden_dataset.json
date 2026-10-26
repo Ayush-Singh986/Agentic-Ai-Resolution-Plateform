@@ -1,17 +1,37 @@
-[
-  {
-    "question":
-      "Payment API timeout",
-
-    "expected":
-      "Database connection pool exhaustion"
-  },
-
-  {
-    "question":
-      "Authentication failures",
-
-    "expected":
-      "Redis cache cluster unavailable"
-  }
-]
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "payment-db-pool",
+      "incident_id": "BENCH-PAYMENT-001",
+      "title": "Payment API timeouts after deployment",
+      "description": "Payment requests time out after the latest production release. The application reports that it cannot acquire database connections, while database connection usage is at its configured limit.",
+      "expected_passage_contains": "Database connection pool exhaustion",
+      "root_cause_required_terms": ["database", "connection pool", "exhaustion"]
+    },
+    {
+      "id": "checkout-hpa",
+      "incident_id": "BENCH-CHECKOUT-001",
+      "title": "Checkout API timeout during traffic surge",
+      "description": "Checkout requests time out during a traffic surge. The Kubernetes deployment stays at its original pod count even though CPU utilization is high and the autoscaler should have added replicas.",
+      "expected_passage_contains": "Horizontal Pod Autoscaler failed to scale",
+      "root_cause_required_terms": ["horizontal pod autoscaler", "failed to scale"]
+    },
+    {
+      "id": "auth-redis",
+      "incident_id": "BENCH-AUTH-001",
+      "title": "Authentication failures",
+      "description": "Users cannot authenticate. The authentication service logs show cache connection errors and the Redis cluster health check is failing.",
+      "expected_passage_contains": "Redis cache cluster unavailable",
+      "root_cause_required_terms": ["redis", "unavailable"]
+    },
+    {
+      "id": "service-memory-leak",
+      "incident_id": "BENCH-MEMORY-001",
+      "title": "High memory usage after deployment",
+      "description": "A microservice's memory usage grows continuously after the latest deployment until the process is restarted by the container runtime.",
+      "expected_passage_contains": "Memory leak introduced",
+      "root_cause_required_terms": ["memory leak", "deployment"]
+    }
+  ]
+}

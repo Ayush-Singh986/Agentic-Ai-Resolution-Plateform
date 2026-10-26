@@ -22,6 +22,9 @@ metrics_module = ModuleType("app.monitoring.metrics")
 metrics_module.incident_counter = Mock()
 metrics_module.latency_metric = Mock()
 
+vector_store_module = ModuleType("app.retrieval.vector_store")
+vector_store_module.get_document_count = Mock(return_value=0)
+
 with patch.dict(
     sys.modules,
     {
@@ -29,6 +32,7 @@ with patch.dict(
         "app.events.kafka_producer": kafka_module,
         "app.memory.redis_memory": memory_module,
         "app.monitoring.metrics": metrics_module,
+        "app.retrieval.vector_store": vector_store_module,
     },
 ):
     from app.api.routes import router
@@ -84,6 +88,16 @@ class IncidentApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         graph_module.graph.invoke.assert_not_called()
+
+    def test_measurement_info_reports_deployed_knowledge_base_document_count(self):
+        with patch.object(routes_module, "get_document_count", return_value=37):
+            response = self.client.get("/measurement-info")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"knowledge_base_document_count": 37},
+        )
 
     def test_empty_or_whitespace_fields_return_422(self):
         response = self.client.post(

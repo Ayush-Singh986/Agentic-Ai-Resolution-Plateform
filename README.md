@@ -275,6 +275,13 @@ Run the automated tests from the repository root after installing dependencies:
 python -m unittest discover -s tests -v
 ```
 
+## Deployed-server measurements
+
+For production-style measurements, use the HTTPS benchmark runner and procedures
+in [SERVER_MEASUREMENTS.md](./SERVER_MEASUREMENTS.md). It sends tests to the
+deployed API, writes only deployed-server observations to an ignored JSON report,
+and does not include local test runs in the report.
+
 The API validates incident input before starting the workflow. `incident_id` must be 1–100 characters, `title` 1–200 characters, and `description` 1–10,000 characters; leading/trailing whitespace is stripped, and unknown JSON fields are rejected. Invalid request bodies should return HTTP `422`. Descriptions containing a configured prompt-injection phrase should return HTTP `400`; neither case should invoke the analysis workflow.
 
 Quickly verify that an empty description is rejected. Run this while the API is running; it prints `PASS` only when the server returns HTTP `422`:

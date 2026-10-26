@@ -48,6 +48,10 @@ from app.monitoring.metrics import (
     latency_metric
 )
 
+from app.retrieval.vector_store import (
+    get_document_count,
+)
+
 router = APIRouter()
 
 
@@ -56,6 +60,13 @@ def health():
 
     return {
         "status": "healthy"
+    }
+
+
+@router.get("/measurement-info")
+def measurement_info():
+    return {
+        "knowledge_base_document_count": get_document_count(),
     }
 
 

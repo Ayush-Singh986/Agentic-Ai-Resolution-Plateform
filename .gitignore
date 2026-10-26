@@ -185,3 +185,5 @@ kafka-logs/
 
 data/generated/
 exports/
+evaluation/measurement_results.json
+server-measurements.json

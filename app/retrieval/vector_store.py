@@ -13,6 +13,10 @@ index = faiss.IndexFlatL2(dimension)
 documents = []
 
 
+def get_document_count():
+    return index.ntotal
+
+
 def create_collection():
     """
     Initialize collection.

@@ -1,35 +1,9 @@
-import json
+"""Compatibility entry point for running the labelled live evaluator."""
 
-from difflib import SequenceMatcher
+import sys
+
+from server_measure import main
 
 
-with open(
-        "evaluation/golden_dataset.json"
-) as f:
-
-    dataset = json.load(f)
-
-scores = []
-
-for item in dataset:
-
-    similarity = SequenceMatcher(
-
-        None,
-
-        item["question"].lower(),
-
-        item["expected"].lower()
-
-    ).ratio()
-
-    scores.append(
-        similarity
-    )
-
-avg = sum(scores) / len(scores)
-
-print(
-    "Evaluation Score:",
-    round(avg, 2)
-)
+if __name__ == "__main__":
+    raise SystemExit(main(["--suite", "quality", *sys.argv[1:]]))
