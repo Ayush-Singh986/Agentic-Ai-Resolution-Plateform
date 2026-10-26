@@ -29,7 +29,8 @@ The project brings those early investigation steps into one workflow. It can giv
 - [Technology Stack](#technology-stack)
 - [Project Structure](#project-structure)
 - [Run Locally](#run-locally)
-- [Deploy to AWS ECS Fargate](#deploy-to-aws-ecs-fargate)
+- [Deploy to AWS with Terraform](#deploy-to-aws-with-terraform)
+- [Manual AWS deployment alternative](#alternative-manual-aws-console-deployment)
 
 ## Architecture
 
@@ -161,14 +162,14 @@ The project is an incident-analysis assistant, not an autonomous repair system. 
 
 # Observability and Monitoring
 
-The application exposes Prometheus metrics on port `8001`:
+The application exposes Prometheus metrics on port `8001` inside its runtime:
 
 | Metric | Type | Description |
 | --- | --- | --- |
 | `incident_requests_total` | Counter | Number of incident requests processed. |
 | `incident_latency_seconds` | Histogram | Time spent processing incident requests. |
 
-Grafana dashboard configuration is included under `monitoring/`; a Grafana deployment is not part of the baseline local run or AWS guide.
+The Terraform AWS deployment creates a CloudWatch dashboard for ECS CPU/memory and ALB traffic, CloudWatch alarms for resource pressure, unhealthy targets, and ALB 5xx errors, and optional SNS email notifications. CloudWatch Logs stores API/UI container logs and VPC Flow Logs. The custom Prometheus endpoint is not exposed through the public ALB or scraped by the AWS baseline; see the AWS monitoring steps below before configuring a private Prometheus collector. The dashboard JSON under `monitoring/` is for Grafana and is not automatically imported into AWS.
 
 # Technology Stack
 
@@ -244,9 +245,211 @@ streamlit run ui/streamlit_app.py
 
 Open `http://localhost:8501`. The API health endpoint and Swagger docs are at `http://localhost:8000/health` and `http://localhost:8000/docs`.
 
-# Deploy to AWS (ECS Fargate)
+# Deploy to AWS with Terraform
+
+This is the recommended AWS deployment path. It creates the application's ECR repository, a two-AZ VPC, an internet-facing ALB with HTTPS, private ECS task subnets, one Fargate task containing the Streamlit UI and FastAPI API, CloudWatch logs and monitoring, and narrowly scoped IAM roles. The Groq API key is read from AWS Secrets Manager.
+
+This is a small, single-task starting point—not a highly available or formally CIS-certified system. It follows selected CIS-aligned practices, including private task networking, restricted ingress, TLS, image scanning, immutable image tags, scoped secret access, and VPC Flow Logs. Apply your organization's complete CIS AWS Foundations Benchmark and compliance requirements separately.
+
+## Prerequisites and account preparation
+
+1. Install Terraform 1.6+, AWS CLI v2, and Docker Desktop. Confirm that Docker is running.
+2. Configure AWS CLI using IAM Identity Center/SSO or another short-lived credential provider. Do not use root credentials or long-lived access keys for routine deployment.
+3. Choose one AWS region. The example uses `ap-south-1`; use that same region for the ACM certificate, Secrets Manager secret, ECS, and Terraform.
+4. Have a DNS name and an **issued** ACM certificate in the selected region that covers that name. If using Route 53, identify the hosted-zone ID. Without Route 53, you must create a DNS alias/CNAME to the ALB after deployment.
+5. Before deployment, harden the AWS account: enable MFA on the root user, do not create root access keys, enable multi-region CloudTrail with protected log storage, and enable AWS Security Hub/Config checks for the CIS benchmark that applies to your account. In Security Hub, enable the CIS AWS Foundations Benchmark standard available for your account/region and review its failed controls. Terraform provisions application resources; it does not configure these account-wide controls.
+6. In the AWS console, create a Secrets Manager secret (for example, `incident-resolution/groq-api-key`) whose secret value is your Groq API key. Copy the **secret ARN**, not the value. Do not paste the secret into Terraform files, command history, or source control.
+7. Choose the allowed client CIDR ranges. Use your corporate/VPN public egress IP with `/32` for a restricted deployment. Set `0.0.0.0/0` only if the application is intended to be publicly reachable.
+
+Verify the AWS identity and region in PowerShell:
+
+```powershell
+aws sts get-caller-identity
+$AWS_REGION = "ap-south-1"
+$env:AWS_DEFAULT_REGION = $AWS_REGION
+```
+
+## Configure and validate Terraform
+
+From the repository root:
+
+```powershell
+Set-Location .\infra\terraform
+terraform init
+terraform fmt -check -recursive
+terraform validate
+```
+
+Set Terraform inputs in the current PowerShell session. Replace the example secret/certificate ARNs, domain, and CIDR with your real values. Set alarm and budget email addresses if you want notifications; both are optional, but recommended for a running deployment.
+
+```powershell
+$env:TF_VAR_aws_region = $AWS_REGION
+$env:TF_VAR_groq_secret_arn = "arn:aws:secretsmanager:ap-south-1:123456789012:secret:incident-resolution/groq-api-key-AbCdEf"
+$env:TF_VAR_certificate_arn = "arn:aws:acm:ap-south-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+$env:TF_VAR_application_domain_name = "incidents.example.com"
+$env:TF_VAR_allowed_client_cidrs = '["203.0.113.10/32"]'
+$env:TF_VAR_alarm_email = "oncall@example.com"
+$env:TF_VAR_budget_alert_email = "cloud-owner@example.com"
+$env:TF_VAR_monthly_budget_usd = "100"
+```
+
+To have Terraform create a DNS alias, set the hosted zone ID as well:
+
+```powershell
+$env:TF_VAR_route53_zone_id = "Z0123456789EXAMPLE"
+```
+
+To use a customer-managed KMS key for the secret, also set `TF_VAR_groq_kms_key_arn` to that key's ARN. The task execution role receives decrypt access only to the supplied key.
+
+## Build, push, and deploy
+
+Terraform needs the application image to exist before it can start ECS. First create just the ECR repository:
+
+```powershell
+terraform apply -target=aws_ecr_repository.app
+```
+
+Authenticate Docker to ECR, build the project image for Fargate's Linux x86-64 architecture, then push the initial immutable tag:
+
+```powershell
+$ACCOUNT_ID = aws sts get-caller-identity --query Account --output text
+$ECR_URI = aws ecr describe-repositories `
+  --repository-names incident-resolution `
+  --region $AWS_REGION `
+  --query "repositories[0].repositoryUri" `
+  --output text
+
+aws ecr get-login-password --region $AWS_REGION |
+  docker login --username AWS --password-stdin "$($ACCOUNT_ID).dkr.ecr.$($AWS_REGION).amazonaws.com"
+
+Set-Location ..\..
+docker build --platform linux/amd64 -t "${ECR_URI}:v1" .
+docker push "${ECR_URI}:v1"
+Set-Location .\infra\terraform
+```
+
+The Docker build installs dependencies, downloads the sentence-transformer model, and runs `ingest_data.py` to bake the FAISS index into the image. It requires internet access and may take several minutes.
+
+Create the rest of the AWS infrastructure and service:
+
+```powershell
+terraform plan
+terraform apply
+terraform output application_url
+terraform output load_balancer_dns_name
+```
+
+Review the proposed changes before confirming the apply. Terraform creates one 2-vCPU/4-GiB task, places it in private subnets without a public IP, and allows inbound application traffic only from the ALB. The ALB serves HTTPS and redirects HTTP to HTTPS. If you supplied a Route 53 zone ID, Terraform creates the alias record; otherwise, point your DNS name at the ALB DNS name output.
+
+If `alarm_email` was set, confirm the AWS SNS subscription email before expecting alarm notifications. If `budget_alert_email` was set, AWS Budgets sends a separate monthly cost notification at 80% of the configured limit. Budget notices are not spending caps.
+
+## Verify the service
+
+Open the `application_url` output and verify the UI loads. Then check the API and API documentation:
+
+```powershell
+$APP_URL = terraform output -raw application_url
+Invoke-RestMethod "$APP_URL/health"
+Start-Process "$APP_URL/docs"
+```
+
+Submit a test incident from the UI, or call the API:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "$APP_URL/incident" `
+  -ContentType "application/json" `
+  -Body '{"incident_id":"INC-1005","title":"Payment API Failure","description":"Payment API timeout after deployment."}'
+```
+
+The first API request can be slower while the model and workflow initialize. Check ECS service events and the API/UI log streams if either target is unhealthy.
+
+## Configure and use AWS monitoring
+
+The Terraform stack provisions the following:
+
+| Resource | What it monitors |
+| --- | --- |
+| CloudWatch dashboard named `incident-resolution` | ECS CPU and memory utilization, ALB request count and target latency, and unhealthy API target count. |
+| ECS CPU alarm | Average service CPU at or above 80% for two consecutive 5-minute periods. |
+| ECS memory alarm | Average service memory at or above 85% for two consecutive 5-minute periods. |
+| ALB unhealthy-target alarm | One or more unhealthy API targets across two 5-minute periods. |
+| ALB 5xx alarm | Five or more ALB-generated 5xx responses in a 5-minute period. |
+| CloudWatch log groups | API/UI container logs and VPC Flow Logs, retained for 30 days by default. |
+| Optional SNS email subscription | Sends alarm and recovery notifications to `alarm_email`; the recipient must confirm the subscription. |
+| Optional AWS Budget | Sends an email notification at 80% of the monthly amount; it does not stop resources or cap charges. |
+
+After the deployment:
+
+1. In **CloudWatch → Dashboards**, open `incident-resolution` and confirm ECS and ALB metrics appear after the service receives traffic.
+2. In **CloudWatch → Alarms**, verify all four alarms exist and are in `OK` or `INSUFFICIENT_DATA` while the service is starting. Confirm `alarm_email` subscription status in **Amazon SNS → Subscriptions**.
+3. In **CloudWatch → Log groups**, open `/ecs/incident-resolution` and review the `api` and `ui` log streams. The `/vpc/incident-resolution/flow` group contains VPC Flow Logs.
+4. To investigate incidents, use **CloudWatch → Logs Insights** on `/ecs/incident-resolution`. Example searches:
+
+   ```text
+   fields @timestamp, @logStream, @message
+   | sort @timestamp desc
+   | limit 100
+   ```
+
+   ```text
+   fields @timestamp, @message
+   | filter @message like /ERROR|Exception|Traceback/
+   | sort @timestamp desc
+   | limit 100
+   ```
+
+5. Generate a test request and watch the dashboard, API logs, and ALB target health to verify telemetry. Avoid intentionally causing a production alarm; test notification delivery by confirming the SNS email subscription or using a dedicated non-production alarm.
+
+The application also starts a Prometheus exporter on port `8001`, exposing `incident_requests_total` and `incident_latency_seconds`. This port is intentionally not open in the task security group and is not published by the ALB. The AWS dashboard/alarms above use AWS-managed ECS and ALB metrics, not these custom application metrics. To collect custom metrics, deploy a Prometheus-compatible collector in the VPC, allow port `8001` only from that collector's security group, configure it to scrape the ECS task IPs, and protect its dashboard/endpoint. Do not expose port `8001` to the internet. The Grafana JSON in `monitoring/` is a dashboard definition; import it into a separately configured Grafana instance if needed.
+
+## Update the application
+
+ECR tags are immutable. For each release, set a new tag, build and push it, and update Terraform to use it:
+
+```powershell
+$IMAGE_TAG = "v2"
+Set-Location ..\..
+docker build --platform linux/amd64 -t "${ECR_URI}:$IMAGE_TAG" .
+docker push "${ECR_URI}:$IMAGE_TAG"
+Set-Location .\infra\terraform
+terraform apply -var="image_tag=$IMAGE_TAG"
+```
+
+Keep the same `TF_VAR_*` values in the current shell when running Terraform. The ECS deployment circuit breaker is enabled and rolls back a failed deployment.
+
+## Cost, state, security, and cleanup
+
+- The ALB, NAT Gateway, Fargate task, CloudWatch ingestion/storage, data transfer, and ECR storage incur charges. The shared single NAT Gateway reduces fixed NAT cost but is a single-AZ dependency; the single ECS task is not highly available. Check current pricing before deployment.
+- Set `budget_alert_email` and an appropriate `monthly_budget_usd`, and delete the stack when it is no longer needed. Notifications may arrive after spend has occurred.
+- Terraform state contains infrastructure details and secret ARNs. Keep it encrypted and access-controlled. The local state and `.tfvars` files are ignored by Git; do not commit them. For team/production use, configure an encrypted, versioned remote state backend with restricted access and locking before applying.
+- The ALB has deletion protection enabled. Before destroying the stack, set `enable_deletion_protection = false` on `aws_lb.app` in `infra/terraform/main.tf` and apply that change.
+- Delete any ECR images first if repository deletion fails. Then, from `infra/terraform`, run:
+
+  ```powershell
+  terraform destroy
+  ```
+
+Redis and Kafka are not included in this deployment. The current optional integrations use localhost defaults and are not durable/shared in ECS; configure and secure remote endpoints in the application before enabling them.
+
+## Troubleshooting
+
+| Symptom | Where to look |
+| --- | --- |
+| `terraform validate` or `apply` fails | Run `terraform fmt -recursive`, `terraform validate`, confirm provider credentials/region, ACM certificate region/status, input ARNs, and AWS permissions. |
+| ECR image not found / task cannot pull | Confirm the image tag was pushed to the repository in the same AWS account and region; inspect ECS stopped-task reason and execution-role permissions. |
+| ECS tasks cannot start | Check ECS service events, stopped-task reason, `/ecs/incident-resolution` logs, secret ARN/access/KMS permissions, and available task memory. |
+| ALB targets unhealthy | Check task security-group ingress from the ALB, UI/API container health checks, and the target-group health path/port. |
+| UI works but incidents fail | Check API container logs, the secret's Groq API key and quota, task outbound HTTPS through NAT, and the Groq service status. |
+| No SNS email alerts | Confirm the email subscription was accepted, the alarm is configured with the topic ARN, and metric data has arrived. |
+| No custom Prometheus metrics | Confirm a private collector can reach task port `8001`; this port is intentionally not internet-accessible. |
+
+---
+
+## Alternative: Manual AWS Console Deployment
 
 This guide deploys the Streamlit UI and FastAPI API as two containers in one ECS Fargate task, stores the image in Amazon ECR, keeps the Groq key in Secrets Manager, sends logs to CloudWatch, and uses an Application Load Balancer (ALB). It is a small single-task deployment; the API, local memory, and FAISS index are not a highly available or durable multi-instance production design.
+
+The manual console procedure below is retained as an alternative. For repeatable deployment, private task networking, and Terraform-managed monitoring, use the Terraform procedure above.
 
 ## What you need
 
